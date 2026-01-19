@@ -33,12 +33,12 @@ class SSTableWriter:
                 val_len = len(val_bytes)
 
             # Write to Data File
-            # Format: KeyLen(I), Key(s), ValLen(i), Value(s)
+            # Format: KeyLen(I), ValLen(i), Key(s), Value(s)
             entry = struct.pack(
-                f">I{len(key_bytes)}si{len(val_bytes)}s",
+                f">Ii{len(key_bytes)}s{len(val_bytes)}s",
                 len(key_bytes),
-                key_bytes,
                 val_len,
+                key_bytes,
                 val_bytes,
             )
             self.data_file.write(entry)
@@ -117,14 +117,12 @@ class SSTableReader:
     def _read_at(self, offset):
         self.data_file.seek(offset)
 
-        # Format: KeyLen(I), Key(s), ValLen(i), Value(s)
-        # We already know the Key, but we need to read past it
-        header = self.data_file.read(4)
-        key_len = struct.unpack(">I", header)[0]
-        self.data_file.read(key_len)  # Skip key
+        # Format: KeyLen(I), ValLen(i), Key(s), Value(s)
+        # Read KeyLen and ValLen first (4 + 4 = 8 bytes)
+        header = self.data_file.read(8)
+        key_len, val_len = struct.unpack(">Ii", header)
 
-        val_len_bytes = self.data_file.read(4)
-        val_len = struct.unpack(">i", val_len_bytes)[0]
+        self.data_file.read(key_len)
 
         if val_len == -1:
             return TOMBSTONE  # Found, but deleted
