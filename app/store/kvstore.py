@@ -13,7 +13,7 @@ class KVStore:
     Architecture: WAL -> Memtable -> SSTables (LSM-Tree)
     """
 
-    def __init__(self, data_dir="data", memtable_size_limit=1024 * 1024):
+    def __init__(self, data_dir="app/data", memtable_size_limit=1024 * 1024):
         self.data_dir = data_dir
         self.memtable_size_limit = memtable_size_limit
 

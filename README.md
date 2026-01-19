@@ -19,7 +19,7 @@ A persistent, network-available Key-Value store implemented in pure Python (Stan
 
 ```bash
 export PYTHONPATH=$PYTHONPATH:.
-python3 server.py
+python3 app/server.py
 ```
 
 ### Usage

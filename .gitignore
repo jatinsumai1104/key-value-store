@@ -14,5 +14,5 @@ logs/
 *.log
 
 # Database
-data/*
-test/data/*
+app/data/*
+app/test/data/*

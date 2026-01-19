@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from store.kvstore import KVStore
 
-TEST_DATA_DIR = "test/data"
+TEST_DATA_DIR = "app/test/data"
 
 def cleanup():
     if os.path.exists(TEST_DATA_DIR):
