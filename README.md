@@ -24,22 +24,37 @@ python3 app/server.py
 
 ### Usage
 
-**Put**
+**1. Put (Insert/Update)**
 
 ```bash
-curl -X POST http://localhost:8080/put -d '{"key": "foo", "value": "bar"}'
+curl -X POST http://localhost:8080/put \
+     -d '{"key": "user:1", "value": "Alice"}'
 ```
 
-**Get**
+**2. Batch Put (High Throughput)**
 
 ```bash
-curl "http://localhost:8080/get?key=foo"
+curl -X POST http://localhost:8080/batchput \
+     -d '{"items": [{"key": "user:2", "value": "Bob"}, {"key": "user:3", "value": "Charlie"}]}'
 ```
 
-**Range Scan**
+**3. Get (Read)**
 
 ```bash
-curl "http://localhost:8080/range?start=a&end=z"
+curl "http://localhost:8080/get?key=user:1"
+```
+
+**4. Range Scan**
+Scan keys between start (inclusive) and end (exclusive).
+
+```bash
+curl "http://localhost:8080/range?start=user:&end=user:~&limit=10"
+```
+
+**5. Delete**
+
+```bash
+curl -X DELETE "http://localhost:8080/delete?key=user:1"
 ```
 
 ## Architecture
@@ -47,4 +62,11 @@ curl "http://localhost:8080/range?start=a&end=z"
 1. **Memtable**: Uses `dict` for O(1) lookups and `bisect` for sorted range scans.
 2. **WAL**: Append-only log for durability.
 3. **SSTables**: Flushes sorted data to disk when Memtable fills up.
-4. **Compaction**: (Size-tiered - simplified MVP implementation)
+
+## Trade-offs & Limitations
+
+- **No Background Compaction**: To keep the implementation simple, we do not merge old SSTables.
+  - **Consequence**: Disk usage increases indefinitely (space amplification).
+  - **Consequence**: Read latency increases linearly with the number of updates (read amplification).
+- **Single Threaded Writer**: We use a `threading.RLock`, so writes are serialized.
+- **In-Memory Index**: We load all keys into RAM. For datasets larger than RAM, a sparse index or Bloom Filters would be required.
