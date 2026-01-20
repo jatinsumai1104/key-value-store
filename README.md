@@ -19,8 +19,7 @@ A persistent, network-available Key-Value store implemented in pure Python (Stan
 ### Option 1: Standalone Mode (Single Node)
 
 ```bash
-cd app
-python3 server.py --port 8080
+python3 app/server.py
 ```
 
 ### Option 2: Distributed Cluster (3 Nodes with RAFT)
@@ -31,31 +30,27 @@ Use the provided script to start a 3-node cluster:
 ./start_cluster.sh
 ```
 
-This starts nodes on ports 9001, 9002, and 9003. To stop the cluster:
+This starts nodes on ports 9001, 9002, and 9003. Data is stored in `app/data/node-X/`.
+
+To stop the cluster:
 
 ```bash
 ./start_cluster.sh stop
+# If processes hang, force kill:
+pkill -9 -f "server.py"
 ```
 
 **Manual cluster startup:**
 
 ```bash
-cd app
-
 # Terminal 1 - Node 1
-python3 server.py --node-id node-1 --port 9001 \
-  --peers "node-2:localhost:9002,node-3:localhost:9003" \
-  --data-dir data/node-1
+python3 app/server.py --node-id node-1 --port 9001 --peers "node-2:localhost:9002,node-3:localhost:9003"
 
 # Terminal 2 - Node 2
-python3 server.py --node-id node-2 --port 9002 \
-  --peers "node-1:localhost:9001,node-3:localhost:9003" \
-  --data-dir data/node-2
+python3 app/server.py --node-id node-2 --port 9002 --peers "node-1:localhost:9001,node-3:localhost:9003"
 
 # Terminal 3 - Node 3
-python3 server.py --node-id node-3 --port 9003 \
-  --peers "node-1:localhost:9001,node-2:localhost:9002" \
-  --data-dir data/node-3
+python3 app/server.py --node-id node-3 --port 9003 --peers "node-1:localhost:9001,node-2:localhost:9002"
 ```
 
 ### Server Options
@@ -63,7 +58,7 @@ python3 server.py --node-id node-3 --port 9003 \
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--node-id` | `standalone` | Unique node identifier |
-| `--port` | `8080` | HTTP server port |
+| `--port` | `9001` | HTTP server port |
 | `--host` | `localhost` | Server host |
 | `--peers` | `""` | Comma-separated peer list (format: `id:host:port`) |
 | `--data-dir` | `app/data` | Directory for persistent storage |
@@ -156,18 +151,17 @@ Writes to followers return `503 Service Unavailable` with leader information:
 
 ## Running Tests
 
+### Standalone KVStore Tests
 ```bash
-cd app
-python3 test/raft_test.py
+python3 app/test/manual_test.py
 ```
+Tests: Basic operations, WAL persistence, range scans, SSTable flush
 
-Tests cover:
-- Leader Election
-- Basic Operations (PUT, GET, DELETE, BATCHPUT, RANGE)
-- Leader Forwarding (503 on follower writes)
-- Log Replication
-- Crash Recovery
-- Leader Failover
+### RAFT Cluster Tests
+```bash
+python3 app/test/raft_test.py
+```
+Tests: Leader election, log replication, crash recovery, leader failover
 
 ## Trade-offs & Limitations
 
