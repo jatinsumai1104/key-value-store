@@ -21,8 +21,8 @@ class NodeState(Enum):
 
 
 # Timing constants (in seconds)
-ELECTION_TIMEOUT_MIN = 0.150  # 150ms
-ELECTION_TIMEOUT_MAX = 0.300  # 300ms
+ELECTION_TIMEOUT_MIN = 0.500  # 500ms (increased from 150ms)
+ELECTION_TIMEOUT_MAX = 1.000  # 1000ms (increased from 300ms)
 HEARTBEAT_INTERVAL = 0.050    # 50ms
 
 

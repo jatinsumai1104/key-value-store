@@ -145,7 +145,7 @@ Writes to followers return `503 Service Unavailable` with leader information:
 
 ### Consensus Layer (RAFT)
 
-1. **Leader Election**: Automatic leader election with randomized timeouts (150-300ms).
+1. **Leader Election**: Automatic leader election with randomized timeouts (500-1000ms).
 2. **Log Replication**: Leader replicates entries to followers via AppendEntries RPC.
 3. **Crash Recovery**: Persists `current_term`, `voted_for`, `commit_index`, and `last_applied`. Replays committed log entries on restart.
 
@@ -162,6 +162,48 @@ Tests: Basic operations, WAL persistence, range scans, SSTable flush
 python3 app/test/raft_test.py
 ```
 Tests: Leader election, log replication, crash recovery, leader failover
+
+### Performance Benchmark
+```bash
+# Standalone benchmark
+python3 app/server.py &
+python3 app/test/benchmark.py --mode standalone
+
+# Cluster benchmark
+./start_cluster.sh
+python3 app/test/benchmark.py --mode cluster
+./start_cluster.sh stop
+
+# Run both modes
+python3 app/test/benchmark.py --mode both --ops 1000
+```
+
+Options:
+- `--mode`: `standalone`, `cluster`, or `both`
+- `--ops`: Number of operations per test (default: 1000)
+- `--host`: Server host (default: localhost)
+- `--port`: Standalone port (default: 9001)
+
+## Performance Benchmarks
+
+Benchmark results from running 1000 operations per test on a local machine (MacOS, Apple Silicon).
+
+| Metric | Standalone Mode | Cluster Mode (3-node RAFT) |
+|--------|-------|-------|
+| Write Throughput | 4,089 ops/sec | 82 ops/sec |
+| Read Throughput | 4,063 ops/sec | 135 ops/sec |
+| Batch Write Throughput | 40,167 items/sec | 7,048 items/sec |
+| Write Latency (P99) | 0.52 ms | 14.06 ms |
+| Read Latency (P99) | 0.30 ms | 1.55 ms |
+
+
+Cluster mode shows **~50x lower write throughput** compared to standalone. This is expected due to:
+
+- Cluster writes are slower due to RAFT consensus (majority replication required)
+- AppendEntries sent to peers one at a time, not in parallel
+- Reads go through leader only for strong consistency
+- Batch operations amortize the consensus overhead significantly
+- Results vary based on hardware, disk speed, and network conditions
 
 ## Trade-offs & Limitations
 
@@ -185,3 +227,119 @@ Tests: Leader election, log replication, crash recovery, leader failover
 
 - **HTTP/1.1 Transport**: Simple but not optimal for high-throughput RPC. gRPC or custom binary protocol would be faster.
 - **No Connection Pooling**: Each RPC creates a new connection.
+
+## Architecture Diagram
+
+### System Overview (3-Node RAFT Cluster)
+
+```
+                                    ┌─────────────────┐
+                                    │     Client      │
+                                    └────────┬────────┘
+                                             │ HTTP Request
+                                             ▼
+                    ┌────────────────────────────────────────────────┐
+                    │                 RAFT Cluster                   │
+                    │                                                │
+                    │   ┌──────────┐  ┌──────────┐  ┌──────────┐     │
+                    │   │  Node 1  │  │  Node 2  │  │  Node 3  │     │
+                    │   │ (Leader) │◄─┤(Follower)│  │(Follower)│     │
+                    │   └────┬─────┘  └────┬─────┘  └────┬─────┘     │
+                    │        │             │             │           │
+                    │        │ AppendEntries (Replication)           │
+                    │        ├─────────────┼─────────────┤           │
+                    │        ▼             ▼             ▼           │
+                    │   ┌─────────┐   ┌─────────┐   ┌─────────┐      │
+                    │   │ KVStore │   │ KVStore │   │ KVStore │      │
+                    │   └─────────┘   └─────────┘   └─────────┘      │
+                    └────────────────────────────────────────────────┘
+```
+
+### Storage Engine (LSM-Tree per Node)
+
+```
+    Write Path                              Read Path
+    ──────────                              ─────────
+        │                                       │
+        ▼                                       ▼
+   ┌─────────┐                            ┌─────────┐
+   │   WAL   │ ◄── fsync (durability)     │ Client  │
+   │ (Disk)  │                            │ Request │
+   └────┬────┘                            └────┬────┘
+        │                                      │
+        ▼                                      ▼
+   ┌─────────────────────────────┐       ┌─────────────┐
+   │         Memtable            │ ◄─────│ 1. Check    │
+   │  (In-Memory: Dict + List)   │       │ Memtable    │
+   │                             │       └────┬────----┘
+   │  ┌───────────────────────┐  │            │ Miss
+   │  │ key1: val1            │  │            ▼
+   │  │ key2: val2            │  │       ┌──────────────┐
+   │  │ key3: val3            │  │       │ 2. Check     │
+   │  └───────────────────────┘  │       │ SSTables     │
+   └──────────────┬──────────────┘       │ (New→Old)    |
+                  │                      └────┬─────────┘
+                  │ Flush (when full)          │
+                  ▼                            ▼
+   ┌─────────────────────────────────────────────────┐
+   │                   SSTables (Disk)               │
+   │                                                 │
+   │  ┌─────────────┐ ┌─────────────┐ ┌───────────┐  │
+   │  │ SST-3 (New) │ │   SST-2     │ │ SST-1(Old)│  │
+   │  │ .data+.index│ │ .data+.index│ │.data+.index  │
+   │  └─────────────┘ └─────────────┘ └───────────┘  │
+   └─────────────────────────────────────────────────┘
+```
+
+### RAFT State Machine
+
+```
+                     ┌─────────────────────────────────────┐
+                     │            RAFT Node                │
+                     │                                     │
+   Vote Request ────►│  ┌─────────────────────────────┐    │
+                     │  │      Persistent State       │    │
+   AppendEntries ───►│  │  ─────────────────────────  │    │
+                     │  │  current_term │ voted_for   │    │
+                     │  │  commit_index │ last_applied│    │
+                     │  └─────────────────────────────┘    │
+                     │                 │                   │
+                     │                 ▼                   │
+                     │  ┌─────────────────────────────┐    │
+                     │  │      RAFT Log (Binary)      │    │
+                     │  │  ┌─────┬─────┬─────┬─────┐  │    │
+                     │  │  │ E1  │ E2  │ E3  │ ... │  │    │
+                     │  │  │T:1  │T:1  │T:2  │     │  │    │
+                     │  │  └─────┴─────┴─────┴─────┘  │    │
+                     │  └─────────────────────────────┘    │
+                     │                 │                   │
+                     │                 │ Apply committed   │
+                     │                 ▼                   │
+                     │  ┌─────────────────────────────┐    │
+                     │  │    State Machine (KVStore)  │    │
+                     │  └─────────────────────────────┘    │
+                     └─────────────────────────────────────┘
+```
+
+### Data Flow (Write Operation)
+
+```
+Client                Leader                 Followers
+  │                     │                       │
+  │ PUT {key, value}    │                       │
+  ├────────────────────►│                       │
+  │                     │                       │
+  │               1. Append to RAFT Log         │
+  │               2. fsync to disk              │
+  │                     │                       │
+  │                     │ AppendEntries RPC     │
+  │                     ├──────────────────────►│
+  │                     │                       │
+  │                     │◄── Success (majority) │
+  │                     │                       │
+  │               3. Mark committed             │
+  │               4. Apply to KVStore           │
+  │                     │                       │
+  │◄── 200 OK ──────────│                       │
+  │                     │                       │
+```
