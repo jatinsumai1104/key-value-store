@@ -195,3 +195,14 @@ class KVStore:
         with self.lock:
             for reader in self.sstables:
                 reader.close()
+
+    def apply_command(self, command: dict) -> None:
+        """Apply a committed RAFT command."""
+        op = command.get("op")
+        if op == "put":
+            self.put(command["key"], command["value"])
+        elif op == "delete":
+            self.delete(command["key"])
+        elif op == "batch_put":
+            items = [(i["key"], i["value"]) for i in command.get("items", [])]
+            self.batch_put(items)
